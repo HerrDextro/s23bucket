@@ -11,7 +11,7 @@ namespace cloud.api.Services
         IMongoCollection<User> _users;
         public UserService(IMongoClient mongoClient, IOptions<MongoSettings> settings) 
         { 
-            var database = settings.Value.UserDatabase;
+            var database = settings.Value.IdentityDatabase;
             _users = mongoClient.GetDatabase(database).GetCollection<User>("users");
         }    
         public async Task RegisterUser(User user)
@@ -27,6 +27,11 @@ namespace cloud.api.Services
                 return null;
             }
             return user;
+        }
+
+        public async Task<User> GetUserById(string id)
+        {
+            return await _users.Find(u => u.Id == id).FirstOrDefaultAsync();
         }
     }
 }

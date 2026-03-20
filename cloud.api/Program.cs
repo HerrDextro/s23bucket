@@ -43,15 +43,26 @@ builder.Services.AddScoped(sp =>
     var client = sp.GetRequiredService<IMongoClient>();
     return client.GetDatabase("maindb");
 });
+//jwt service for generating tokens
+builder.Services.AddScoped<JWTService>();
+//binding JwtSettings to JWTSettings class
+builder.Services.Configure<JWTSettings>(jwtSettings); //dont have to GetSection because we already have it in the jwtSettings variable
+
 //user service (mongodb for users)
 builder.Services.AddScoped<UserService>(); //my service for the endpoints to use user db
 //binding appsettings.json to class
 builder.Services.Configure<MongoSettings>(builder.Configuration.GetSection("MongoDBSettings")); //bind class mongosettings to json in appsettings.json, so we can inject it in the controllers and use it to get the connection string and database name.
 
-//jwt service for generating tokens
-builder.Services.AddScoped<JWTService>();
-//binding JwtSettings to JWTSettings class
-builder.Services.Configure<JWTSettings>(jwtSettings); //dont have to GetSection because we already have it in the jwtSettings variable
+//auth service
+builder.Services.AddScoped<AuthService>();
+//bind appsettigs.json to AuthService
+builder.Services.Configure<MongoSettings>(builder.Configuration.GetSection("MongoDBSettings")); //bind class mongosettings to json in appsettings.json, so we can inject it in the controllers and use it to get the connection string and database name.
+
+//cursed service service
+builder.Services.AddScoped<CursedServiceService>();
+//binding appsettings.json to cursed service service
+builder.Services.Configure<MongoSettings>(builder.Configuration.GetSection("MongoDBSettings")); //bind class mongosettings to json in appsettings.json, so we can inject it in the controllers and use it to get the connection string and database name.
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -69,5 +80,6 @@ app.UseAuthorization();
 app.UseAuthentication();
 
 app.MapAuthEndpoints();
+app.MapServiceEndpoints();
 
 app.Run();
