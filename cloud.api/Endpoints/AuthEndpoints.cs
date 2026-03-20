@@ -7,7 +7,7 @@ using System.Security.Claims;
 
 namespace cloud.api.Endpoints; //file scoped is cleaner 
 
-public static class AuthEndpoints
+public static class AuthEndpoints //NOTE: every single depp can register an account and upload his own files, maybe change that in the end
 {
     public static void MapAuthEndpoints(this IEndpointRouteBuilder app)
     {
@@ -18,12 +18,7 @@ public static class AuthEndpoints
 
         app.MapPost("/auth/register",async (UserDto userDto, UserService userService) => 
         {
-            var newUser = new User
-            {
-                Username = userDto.username,
-                HashedPassword = BCrypt.Net.BCrypt.HashPassword(userDto.password)
-            };
-            await userService.RegisterUser(newUser);
+            await userService.RegisterUser(userDto);
             return Results.Created();
         });
 

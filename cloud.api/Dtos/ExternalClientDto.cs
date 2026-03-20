@@ -1,6 +1,6 @@
 ﻿namespace cloud.api.Dtos
 {
-    public class ServiceDto
+    public class ExternalClientDto
     {
         public string name { get; set; }
         public string url { get; set; } = string.Empty;

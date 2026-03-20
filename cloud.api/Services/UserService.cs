@@ -14,9 +14,14 @@ namespace cloud.api.Services
             var database = settings.Value.IdentityDatabase;
             _users = mongoClient.GetDatabase(database).GetCollection<User>("users"); //here error db name
         }    
-        public async Task RegisterUser(User user)
+        public async Task RegisterUser(UserDto userDto)
         {
-            await _users.InsertOneAsync(user);
+            var newUser = new User
+            {
+                Username = userDto.username,
+                HashedPassword = BCrypt.Net.BCrypt.HashPassword(userDto.password)
+            };
+            await _users.InsertOneAsync(newUser);
         }
 
         public async Task<User?> LoginUser(UserDto userDto)
