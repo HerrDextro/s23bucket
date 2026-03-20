@@ -11,7 +11,7 @@ namespace cloud.api.Services
 
         public CursedServiceService(IMongoClient mongoClient, IOptions<MongoSettings> settings)
         {
-            var database = settings.Value.MainDatabase;
+            var database = settings.Value.ServiceDatabase;
             _services = mongoClient.GetDatabase(database).GetCollection<Service>("services");
         }
         public async Task StoreService(Service service)

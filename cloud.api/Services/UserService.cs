@@ -12,7 +12,7 @@ namespace cloud.api.Services
         public UserService(IMongoClient mongoClient, IOptions<MongoSettings> settings) 
         { 
             var database = settings.Value.IdentityDatabase;
-            _users = mongoClient.GetDatabase(database).GetCollection<User>("users");
+            _users = mongoClient.GetDatabase(database).GetCollection<User>("users"); //here error db name
         }    
         public async Task RegisterUser(User user)
         {
