@@ -59,7 +59,7 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.Configure<MongoSettings>(builder.Configuration.GetSection("MongoDBSettings")); //bind class mongosettings to json in appsettings.json, so we can inject it in the controllers and use it to get the connection string and database name.
 
 //cursed service service
-builder.Services.AddScoped<ExternalClientService>();
+builder.Services.AddSingleton<ExternalClientService>(); //singleton because list of resource requests needs to be kept in memory
 //binding appsettings.json to cursed service service
 builder.Services.Configure<MongoSettings>(builder.Configuration.GetSection("MongoDBSettings")); //bind class mongosettings to json in appsettings.json, so we can inject it in the controllers and use it to get the connection string and database name.
 

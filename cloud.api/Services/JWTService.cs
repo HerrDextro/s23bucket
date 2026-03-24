@@ -41,5 +41,28 @@ namespace cloud.api.Services
 
             return tokenHandler.WriteToken(token);
         }
+        public string GenerateClientToken(string requestId)
+        {
+            var claims = new List<Claim>{
+                new Claim("request_id", requestId)
+            };
+            
+            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_settings.Value.SecretKey));
+            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+            var tokenDescriptor = new SecurityTokenDescriptor
+            {
+                Subject = new ClaimsIdentity(claims),
+                Expires = DateTime.UtcNow.AddMinutes(_settings.Value.ExternalClientExpiryInMinutes),
+                Issuer = _settings.Value.Issuer,
+                Audience = _settings.Value.Audience,
+                SigningCredentials = creds
+            };
+
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var token = tokenHandler.CreateToken(tokenDescriptor);
+
+            return tokenHandler.WriteToken(token);
+        }
     }
 }

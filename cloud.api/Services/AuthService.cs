@@ -9,7 +9,7 @@ using System.Security.Cryptography;
 
 namespace cloud.api.Services
 {
-    public class AuthService
+    public class AuthService //NOTE: hashing refreshtokens?
     {
         
         IMongoCollection<RefreshToken> _refreshTokens;

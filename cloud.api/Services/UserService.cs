@@ -34,6 +34,11 @@ namespace cloud.api.Services
             return user;
         }
 
+        public async Task<User> GetUserByUsername(string username)
+        {
+            return await _users.Find(u => u.Username == username).FirstOrDefaultAsync();
+        }
+
         public async Task<User> GetUserById(string id)
         {
             return await _users.Find(u => u.Id == id).FirstOrDefaultAsync();

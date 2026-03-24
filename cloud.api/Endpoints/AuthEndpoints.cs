@@ -16,8 +16,13 @@ public static class AuthEndpoints //NOTE: every single depp can register an acco
             return Results.Ok("Hello from the API!");
         });
 
-        app.MapPost("/auth/register",async (UserDto userDto, UserService userService) => 
+        app.MapPost("/auth/register",async (UserDto userDto, UserService userService) => //urestricted amount of users can be created!! fix
         {
+            var user = await userService.GetUserByUsername(userDto.username);
+            if (user != null)
+            {
+                return Results.BadRequest("Username already exists");
+            }
             await userService.RegisterUser(userDto);
             return Results.Created();
         });
