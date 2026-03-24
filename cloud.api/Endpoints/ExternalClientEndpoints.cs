@@ -27,7 +27,7 @@ namespace cloud.api.Endpoints
 
             app.MapPost("/service/request", async ([FromBody]ResourceRequestDto requestDto, [FromServices]JWTService jwtService, ExternalClientService externalClientService) => 
             {
-                var requestId = await externalClientService.StoreResourceRequest(requestDto.resource_id_permission); //Test this carefully. Tested: [ ]
+                var requestId = externalClientService.StoreResourceRequest(requestDto.resource_id_permission); //Test this carefully. Tested: [ ]
 
                 var tempToken = jwtService.GenerateClientToken(requestId);
                 return Results.Ok(new { token = tempToken });

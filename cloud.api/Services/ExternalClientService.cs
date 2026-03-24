@@ -2,6 +2,8 @@
 using cloud.api.Interfaces;
 using cloud.api.Models;
 using cloud.api.Settings;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using MongoDB.Driver;
 using System.Collections.Concurrent;
@@ -10,15 +12,15 @@ namespace cloud.api.Services
 {
     public class ExternalClientService : IRequestTracker
     {
-        IMongoCollection<Models.ExternalClient> _services;
-        //IMongoCollection<Models.ResourceRequest> _resourceRequests;
+        IMongoCollection<ExternalClient> _services;
+        MemoryCache _cache = new MemoryCache(new MemoryCacheOptions());
+
         private readonly ConcurrentDictionary<string, ResourceRequest> _resourceRequest = new(); //concurrent because Lists arent thread safe
 
         public ExternalClientService(IMongoClient mongoClient, IOptions<MongoSettings> settings)
         {
             var database = settings.Value.ServiceDatabase;
-            _services = mongoClient.GetDatabase(database).GetCollection<Models.ExternalClient>("services");
-            //_resourceRequests = mongoClient.GetDatabase(database).GetCollection<Models.ResourceRequest>("services"); //watch out, several collections per DB allowed
+            _services = mongoClient.GetDatabase(database).GetCollection<ExternalClient>("services");
         }
         public async Task StoreService(ExternalClientDto serviceDto)
         {
@@ -48,43 +50,19 @@ namespace cloud.api.Services
             return false;
         }
 
-        //DB is cleaner, but speed and SSD wear. 
-        /*
-        public async Task<string> StoreResourceRequest(Dictionary<string, string> resourceIdPermission) 
-        { 
-            var newRequest = new ResourceRequest
-            {
-                Id = Guid.NewGuid().ToString(),
-                resource_id_permission = resourceIdPermission
-            };
-            await _resourceRequests.InsertOneAsync(newRequest);
-            return newRequest.Id;
-        }
-
-        public async Task<ResourceRequest> GetStoredResourceRequest(string requestId) //here: return the whole request or only dictionary with permissions
-        { 
-            return await _resourceRequests.Find(k => k.Id == requestId).FirstOrDefaultAsync();
-        }
-        */
-        public async Task<string> StoreResourceRequest(Dictionary<string, string> permission)
+        public string StoreResourceRequest(Dictionary<string, string> permission)
         {
             var id = Guid.NewGuid().ToString();
-            _resourceRequest.TryAdd(id, new ResourceRequest { Creation = DateTime.Now, Permissions = permission }); //Bit cursed innit
-
+            _cache.Set(id,  new ResourceRequest { Permissions = permission }, new MemoryCacheEntryOptions
+            {
+                SlidingExpiration = TimeSpan.FromMinutes(1)
+            });
             return id;
         }
         public Dictionary<string, string>? GetStoredResourceRequest(string id)
         {
-            if (_resourceRequest.TryGetValue(id, out var resourceRequest))
-            {
-                if (resourceRequest.Creation < DateTime.UtcNow.AddMinutes(-1))
-                {
-                    _resourceRequest.TryRemove(id, out _);
-                    return null;
-                }
-                return resourceRequest.Permissions;
-            }
-            return null;
+            var storedRequest = _cache.TryGetValue(id, out ResourceRequest resourceRequest);
+            return storedRequest ? resourceRequest.Permissions : null; //shorthand if statement, if storedRequest is true return resourceRequest.Permissions else return null
         }
 
 
