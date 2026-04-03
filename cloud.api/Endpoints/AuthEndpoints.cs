@@ -38,7 +38,7 @@ public static class AuthEndpoints //NOTE: every single depp can register an acco
             {
                 var jwt = jwtService.GenerateToken(user);
                 var refreshToken = await authService.GenerateRefreshToken(user);
-                authService.StoreRefreshToken(refreshToken);
+                await authService.StoreRefreshToken(refreshToken);
                 return Results.Ok(new { token = jwt, refreshToken = refreshToken.Token});
             }
         });

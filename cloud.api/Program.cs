@@ -10,7 +10,7 @@ var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration["MongoDBSettings:ConnectionString"];
 
 var jwtSettings = builder.Configuration.GetSection("JwtSettings");
-var secretKey = Encoding.UTF8.GetBytes(jwtSettings["SecretKey"]);
+var secretKey = Encoding.UTF8.GetBytes(jwtSettings["SecretKey"]); //possible null reference ahh
 
 
 
@@ -63,6 +63,10 @@ builder.Services.AddSingleton<ExternalClientService>(); //singleton because list
 //binding appsettings.json to cursed service service
 builder.Services.Configure<MongoSettings>(builder.Configuration.GetSection("MongoDBSettings")); //bind class mongosettings to json in appsettings.json, so we can inject it in the controllers and use it to get the connection string and database name.
 
+//file service
+builder.Services.AddScoped<FileService>();
+builder.Services.Configure<MongoSettings>(builder.Configuration.GetSection("MongoDBSettings"));
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -81,5 +85,12 @@ app.UseAuthentication();
 
 app.MapAuthEndpoints();
 app.MapServiceEndpoints();
+app.MapFileEndpoints();
 
 app.Run();
+
+
+//notes:
+//implement cors
+//implement anti forgery
+//ask chatter if refreshtokens should be hashed, if so implement hashing and salting for refresh tokens in the auth service

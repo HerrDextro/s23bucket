@@ -16,7 +16,7 @@ namespace cloud.api.Services
         public AuthService(IMongoClient mongoClient, IOptions<MongoSettings> settings) 
         { 
             var database = settings.Value.IdentityDatabase;
-            _refreshTokens = mongoClient.GetDatabase(database).GetCollection<RefreshToken>("refreshTokens"); //need to test this
+            _refreshTokens = mongoClient.GetDatabase(database).GetCollection<RefreshToken>("refreshTokens");
         }
         public async Task<RefreshToken> GenerateRefreshToken(User user)
         {

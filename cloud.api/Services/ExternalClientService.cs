@@ -53,7 +53,7 @@ namespace cloud.api.Services
         public string StoreResourceRequest(Dictionary<string, string> permission)
         {
             var id = Guid.NewGuid().ToString();
-            _cache.Set(id,  new ResourceRequest { Permissions = permission }, new MemoryCacheEntryOptions
+            _cache.Set(id,  new ResourceRequest { Permissions = permission }, new MemoryCacheEntryOptions //CRITICAL, only ghosts, doesnt actually dispose
             {
                 SlidingExpiration = TimeSpan.FromMinutes(1)
             });
@@ -61,8 +61,10 @@ namespace cloud.api.Services
         }
         public Dictionary<string, string>? GetStoredResourceRequest(string id)
         {
-            var storedRequest = _cache.TryGetValue(id, out ResourceRequest resourceRequest);
-            return storedRequest ? resourceRequest.Permissions : null; //shorthand if statement, if storedRequest is true return resourceRequest.Permissions else return null
+            var storedRequest = _cache.TryGetValue(id, out ResourceRequest? resourceRequest);
+
+            if (resourceRequest == null) { return null; }
+            return resourceRequest.Permissions;
         }
 
 
