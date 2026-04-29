@@ -16,25 +16,11 @@ namespace cloud.api.Services
         {
             _bucket = new GridFSBucket(mongoClient.GetDatabase(settings.Value.MainDatabase));
         }
-        /*
-        public async Task<string> UploadFileAsync(Stream fileStream, string fileName, string contentType)
-        {
-            var options = new GridFSUploadOptions
-            {
-                Metadata = new BsonDocument
-                {
-                    { "contentType", contentType }
-                }
-            };
-            var fileId = await _bucket.UploadFromStreamAsync(fileName, fileStream, options);
-            return fileId.ToString();
-        }*/
-        public async Task<string> UploadFileAsync(IFormFile file, string path, bool isPublic, string ownerId)
+        
+        public async Task<string> UploadFileAsync(IFormFile file, string path, bool isPublic, string ownerId, Dictionary<string, string> permissions)
         {
             // 1. Open a stream from the IFormFile
             using var stream = file.OpenReadStream();
-
-            Dictionary<string, string> Permissions = new Dictionary<string, string>();
 
             // 2. Pack your custom metadata
             var options = new GridFSUploadOptions
@@ -45,7 +31,7 @@ namespace cloud.api.Services
                     { "isPublic", isPublic },
                     { "ownerId", ownerId },
                     { "contentType", file.ContentType },
-                    { "permission", Permissions.ToBsonDocument() }
+                    { "permission", permissions.ToBsonDocument() }
                 }
             };
 

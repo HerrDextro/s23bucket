@@ -15,9 +15,10 @@ namespace cloud.api.Endpoints
                 {
                     return Results.BadRequest("Service with this name already exists");
                 }
-                await serviceService.StoreService(serviceDto);  //creates identical services without restriction!!!
+                await serviceService.StoreService(serviceDto);
                 return Results.Created();
-            });
+            })
+            .RequireAuthorization();
 
             app.MapGet("/service/getall", async (ExternalClientService serviceService) => 
             { 
