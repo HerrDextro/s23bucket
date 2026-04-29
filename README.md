@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Lernperiode-9
 Containerised private fileserver using  ASP.NET and MongoDB as the Backend, and a Spectre.Console Frontend
 
@@ -61,3 +62,7 @@ Beschreibung: Vorbereitung des Systems für den Einsatz auf dem Raspberry Pi.
 Ziel: Die Anwendung ist sicher konfiguriert und bereit für das Deployment auf produktiver Hardware.  
 - [ ] Auslagerung sensibler Daten in Environment Variables  
 - [ ] Optimierung des Docker-Images für ARM-Architekturen  
+=======
+# s23bucket
+Cloud file bucket, hosted on homemade server
+>>>>>>> 53050caebb3951dd1f8eb27ce87545f22da7197a
