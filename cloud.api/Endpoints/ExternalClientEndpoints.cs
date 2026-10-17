@@ -20,7 +20,7 @@ namespace cloud.api.Endpoints
             })
             .RequireAuthorization();
 
-            app.MapGet("/service/getall", async (ExternalClientService serviceService) => 
+            app.MapGet("/service/getall", async (ExternalClientService serviceService) =>  //Only for debugging purposes, remove later
             { 
                 var services = await serviceService.GetAllServices();
                 return Results.Ok(services);

@@ -47,13 +47,18 @@ public static class AuthEndpoints //NOTE: every single depp can register an acco
         {
             var token = dto.RefreshToken;
             var storedRefreshToken = await authService.GetRefreshTokenByToken(token);
-            if(storedRefreshToken == null || storedRefreshToken.ExpiryDate < DateTime.UtcNow || storedRefreshToken.IsRevoked)
+            if(storedRefreshToken == null || storedRefreshToken.ExpiryDate < DateTime.UtcNow || storedRefreshToken.IsRevoked) //make sure to revoke if acc is deleted and still handle null ids just in case
             {
                 return Results.Unauthorized();
             }
 
             var userId = storedRefreshToken.UserId;
+
             var userObj =  await userService.GetUserById(userId);
+            if (userObj == null)
+            {
+                return Results.Unauthorized();
+            }
             var jwt = jwtService.GenerateToken(userObj);
             return Results.Ok(new { token = jwt }); //fixed window, forced re login
         });

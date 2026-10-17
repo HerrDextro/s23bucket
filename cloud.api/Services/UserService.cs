@@ -9,6 +9,11 @@ namespace cloud.api.Services
     public class UserService
     {
         IMongoCollection<User> _users;
+        private static readonly User _dummyUser = new User
+        {
+            Username = "dummy",
+            HashedPassword = BCrypt.Net.BCrypt.HashPassword("dummy")
+        };
         public UserService(IMongoClient mongoClient, IOptions<MongoSettings> settings) 
         { 
             var database = settings.Value.IdentityDatabase;
@@ -26,12 +31,19 @@ namespace cloud.api.Services
 
         public async Task<User?> LoginUser(UserDto userDto)
         {
+            //create dummy user and pwd so it can stay constant time
             var user = await _users.Find(u => u.Username == userDto.username).FirstOrDefaultAsync();
-            if(user == null || !BCrypt.Net.BCrypt.Verify(userDto.password, user.HashedPassword))
+
+            if (user != null && BCrypt.Net.BCrypt.Verify(userDto.password, user.HashedPassword))
             {
+                return user;
+            }
+            else if (user == null)
+            {
+                BCrypt.Net.BCrypt.Verify("dummy", _dummyUser.HashedPassword);
                 return null;
             }
-            return user;
+            return null;
         }
 
         public async Task<User> GetUserByUsername(string username)
@@ -39,7 +51,7 @@ namespace cloud.api.Services
             return await _users.Find(u => u.Username == username).FirstOrDefaultAsync();
         }
 
-        public async Task<User> GetUserById(string id)
+        public async Task<User?> GetUserById(string id)
         {
             return await _users.Find(u => u.Id == id).FirstOrDefaultAsync();
         }

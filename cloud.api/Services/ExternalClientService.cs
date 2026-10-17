@@ -14,9 +14,6 @@ namespace cloud.api.Services
     {
         IMongoCollection<ExternalClient> _services;
         MemoryCache _cache = new MemoryCache(new MemoryCacheOptions());
-
-        private readonly ConcurrentDictionary<string, ResourceRequest> _resourceRequest = new(); //concurrent because Lists arent thread safe
-
         public ExternalClientService(IMongoClient mongoClient, IOptions<MongoSettings> settings)
         {
             var database = settings.Value.ServiceDatabase;
@@ -33,9 +30,14 @@ namespace cloud.api.Services
             await _services.InsertOneAsync(newService);
         }
 
-        public async Task<List<ExternalClient>> GetAllServices()
+        public async Task<List<ExternalClient>> GetAllServices() //use a dto?
         {
-            return await _services.Find(k => true).ToListAsync();
+            List<ExternalClient> list = await _services.Find(k => true).ToListAsync();
+            foreach (var service in list)
+            {
+                service.HashedApiKey = null; //remove hashed api key from response
+            }
+            return list;
         }
 
         public async Task<ExternalClient?> GetServiceByName(string name)
@@ -46,7 +48,7 @@ namespace cloud.api.Services
         public async Task<bool> CheckServiceApiKey(string serviceName, string apiKey) //later: check if access to resource
         {
             var service = await _services.Find(k => k.Name == serviceName).FirstOrDefaultAsync();
-            if (service != null && BCrypt.Net.BCrypt.Verify(service.HashedApiKey, apiKey)) { return true; }
+            if (service != null && BCrypt.Net.BCrypt.Verify(apiKey, service.HashedApiKey)) { return true; }
             return false;
         }
 

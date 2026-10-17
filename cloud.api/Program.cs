@@ -10,8 +10,12 @@ var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration["MongoDBSettings:ConnectionString"];
 
 var jwtSettings = builder.Configuration.GetSection("JwtSettings");
-var secretKey = Encoding.UTF8.GetBytes(jwtSettings["SecretKey"]); //possible null reference ahh
-
+var secretKeyText = jwtSettings["SecretKey"];
+if (String.IsNullOrWhiteSpace(secretKeyText) || Encoding.UTF8.GetBytes(secretKeyText).Length < 32)
+{
+    throw new InvalidOperationException("JWT Secret Key is null, whitespace or < 32 characters. Please check your configuration.");
+}
+var secretKey = Encoding.UTF8.GetBytes(secretKeyText);
 
 
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
@@ -37,12 +41,6 @@ builder.Services.AddAuthorization();
 // 2. Register the CLIENT as a Singleton (The "Engine")
 builder.Services.AddSingleton<IMongoClient>(_ => new MongoClient(connectionString));
 
-// 3. Register the DATABASE as Scoped (The "Office")
-builder.Services.AddScoped(sp =>
-{
-    var client = sp.GetRequiredService<IMongoClient>();
-    return client.GetDatabase("maindb");
-});
 //jwt service for generating tokens
 builder.Services.AddScoped<JWTService>();
 //binding JwtSettings to JWTSettings class
@@ -55,17 +53,11 @@ builder.Services.Configure<MongoSettings>(builder.Configuration.GetSection("Mong
 
 //auth service
 builder.Services.AddScoped<AuthService>();
-//bind appsettigs.json to AuthService
-builder.Services.Configure<MongoSettings>(builder.Configuration.GetSection("MongoDBSettings")); //bind class mongosettings to json in appsettings.json, so we can inject it in the controllers and use it to get the connection string and database name.
-
 //cursed service service
 builder.Services.AddSingleton<ExternalClientService>(); //singleton because list of resource requests needs to be kept in memory
-//binding appsettings.json to cursed service service
-builder.Services.Configure<MongoSettings>(builder.Configuration.GetSection("MongoDBSettings")); //bind class mongosettings to json in appsettings.json, so we can inject it in the controllers and use it to get the connection string and database name.
 
 //file service
 builder.Services.AddScoped<FileService>();
-builder.Services.Configure<MongoSettings>(builder.Configuration.GetSection("MongoDBSettings"));
 
 var app = builder.Build();
 
@@ -79,9 +71,8 @@ if (app.Environment.IsDevelopment())
 
 
 //app.UseHttpsRedirection();
-
-app.UseAuthorization();
-app.UseAuthentication();
+app.UseAuthentication(); 
+app.UseAuthorization(); //there 2 must remain in this order
 
 app.MapAuthEndpoints();
 app.MapServiceEndpoints();
