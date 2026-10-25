@@ -27,7 +27,7 @@ public static class AuthEndpoints //NOTE: every single depp can register an acco
             return Results.Created();
         });
 
-        app.MapPost("/auth/login", async (UserDto userDto, UserService userService, JWTService jwtService, AuthService authService) => 
+        app.MapPost("/auth/login", async (UserDto userDto, UserService userService, JWTService jwtService, AuthService authService) => //OPEN: stop people from being able to re login whenever they want to infinitely extend the auth window
         {
             var user = await userService.LoginUser(userDto);
             if (user == null)
