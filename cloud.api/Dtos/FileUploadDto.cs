@@ -5,10 +5,10 @@ namespace cloud.api.Dtos
 {
     public class FileUploadDto
     {
-        public IFormFile File { get; set; }
+        public IFormFile? File { get; set; }
 
         [FromForm]
-        public string DestinationPath {  get; set; }
+        public string ParentPath {  get; set; } //this is the parentpath only
         [FromForm]
         public UploadType Type { get; set; }
 

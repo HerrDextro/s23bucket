@@ -17,7 +17,6 @@ if (String.IsNullOrWhiteSpace(secretKeyText) || Encoding.UTF8.GetBytes(secretKey
 }
 var secretKey = Encoding.UTF8.GetBytes(secretKeyText);
 
-
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 
@@ -58,6 +57,10 @@ builder.Services.AddSingleton<ExternalClientService>(); //singleton because list
 
 //file service
 builder.Services.AddScoped<FileService>();
+
+//more endpoint ahh service
+//builder.Services.AddHttpContextAccessor();
+
 
 var app = builder.Build();
 
