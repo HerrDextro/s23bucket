@@ -9,8 +9,5 @@ namespace cloud.api.Dtos
 
         [FromForm]
         public string ParentPath {  get; set; } //this is the parentpath only
-        [FromForm]
-        public UploadType Type { get; set; }
-
     }
 }

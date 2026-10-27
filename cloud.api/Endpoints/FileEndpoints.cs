@@ -26,51 +26,30 @@ namespace cloud.api.Endpoints
 
                 if (userId == null) //ask big C abt this
                 {
-                    return Results.Text("UserId not found in claims");
+                    return Results.Unauthorized();
                 }
 
                 var permissions = new Dictionary<string, FilePermissions>();
                 permissions.Add(userId, FilePermissions.ReadWrite);
 
-                var fileId = await fileService.UploadFileAsync(metadata.File, metadata.ParentPath, metadata.Type, userId, userName, permissions);
-
-                string locationUri = Path.Combine(metadata.ParentPath, metadata.File.FileName); 
-
-                return Results.Created(locationUri, new { FileId = fileId });
-            })
-            .DisableAntiforgery()
-            .RequireAuthorization();
-            
-            //GET files by id
-            app.MapGet("/files/{id}", async (string id, ClaimsPrincipal userClaim, FileService fileService, HttpContext context) => //always 404
-            {
-                var userId = userClaim.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                var (stream, fileName, httpResult) = await fileService.TryGetFileById(id, userId);
-
-                context.Response.Headers.Append("X-File-Owner-Id", userId);
-                context.Response.Headers.Append("X-Upload-Type", "Invoice");
-
-                return Results.File(stream, fileName);
-            })
-            .RequireAuthorization();
-
-            //GET files by path 
-            app.MapGet("/files", async (string path, ClaimsPrincipal userClaim, FileService fileService) => 
-            {
-                var userId = userClaim.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                GridFSFileResult? fileResult = await fileService.TryGetFileByPath(path, userId);
-
-                if (fileResult == null)
+                ServiceResult<UploadResult> result = await fileService.UploadFileAsync(metadata.File, metadata.ParentPath, userId, userName, permissions);
+                if(result.result == ResultReturn.BadRequest)
                 {
-                    return Results.NotFound(new { message = "No file found" });
+                    return Results.BadRequest("Unable to normalize Path. The Filepath might be malformed."); //polite ahh return
+                }
+                if (result.result == ResultReturn.NotFound)
+                {
+                    return Results.NotFound("Parent path contains inexistant parent directory");
+                }
+                if (result.result == ResultReturn.Conflict)
+                {
+                    return Results.Conflict("File with the same filename already eixsts");
                 }
 
-                return Results.Stream(
-                    fileResult.Stream,
-                    //contentType: fileResult.ContentType,
-                    fileDownloadName: fileResult.Filename
-                );
+                string locationUri = $"{metadata.ParentPath}/{metadata.File.FileName}";
+                return Results.Created(locationUri, new { FileId = result.Value.uploadId });
             })
+            .DisableAntiforgery()
             .RequireAuthorization();
 
             //POST folder
@@ -81,18 +60,69 @@ namespace cloud.api.Endpoints
 
                 if (userId == null) //ask big C abt this
                 {
-                    return Results.Text("UserId not found in claims");
+                    return Results.Unauthorized();
                 }
 
                 var permissions = new Dictionary<string, FilePermissions>();
                 permissions.Add(userId, FilePermissions.ReadWrite);
 
-                var fileId = await fileService.UploadFolderAsync(metadata.ParentPath, metadata.FolderName, userId, userName, permissions);
+                ServiceResult<UploadResult> result = await fileService.UploadFolderAsync(metadata.ParentPath, metadata.FolderName, userId, userName, permissions);
+                if (result.result == ResultReturn.BadRequest)
+                {
+                    return Results.BadRequest("Unable to normalize Path. The Filepath might be malformed."); //polite ahh return
+                }
+                if (result.result == ResultReturn.NotFound)
+                {
+                    return Results.NotFound("Parent path contains inexistant parent directory");
+                }
+                if(result.result == ResultReturn.Conflict)
+                {
+                    return Results.Conflict("Folder with the same foldername already eixsts");
+                }
 
-                string locationUri = Path.Combine(metadata.ParentPath, metadata.FolderName);
+                string locationUri = $"{metadata.ParentPath}/{metadata.FolderName}";
 
-                return Results.Created(locationUri, new { FileId = fileId });
 
+                return Results.Created(locationUri, new { FileId = result.Value.uploadId });
+
+            })
+            .RequireAuthorization();
+
+            //GET files by id
+            app.MapGet("/files/{id}", async (string id, ClaimsPrincipal userClaim, FileService fileService, HttpContext context) => //always 404
+            {
+                var userId = userClaim.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                var result = await fileService.TryGetFileById(id, userId);
+
+                if (result.result == ResultReturn.BadRequest)
+                {
+                    return Results.BadRequest("Unable to normalize Path. The Filepath might be malformed."); //polite ahh return
+                }
+                if (result.result == ResultReturn.NotFound)
+                {
+                    return Results.NotFound("Parent path contains inexistant parent directory");
+                }
+
+                return Results.File(result.Value.Stream, result.Value.Filename, result.Value.ContentType);
+            })
+            .RequireAuthorization();
+
+            //GET files by path 
+            app.MapGet("/files", async (string path, ClaimsPrincipal userClaim, FileService fileService) => 
+            {
+                var userId = userClaim.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                ServiceResult<GridFSFileResult?> result = await fileService.TryGetFileByPath(path, userId);
+
+                if (result.result == ResultReturn.BadRequest)
+                {
+                    return Results.BadRequest("Unable to normalize Path. The Filepath might be malformed."); //polite ahh return
+                }
+                if (result.result == ResultReturn.NotFound)
+                {
+                    return Results.NotFound("Parent path contains inexistant parent directory");
+                }
+
+                return Results.File(result.Value.Stream, result.Value.Filename, result.Value.ContentType);
             })
             .RequireAuthorization();
 
