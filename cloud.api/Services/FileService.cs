@@ -11,6 +11,7 @@ using System.Net.Mime;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Reflection.Metadata.Ecma335;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
@@ -28,76 +29,10 @@ namespace cloud.api.Services
             _db = mongoClient.GetDatabase(settings.Value.MainDatabase);
             _bucket = new GridFSBucket(_db);
         }
-        /*
-         Path rules (static normalizer, no fields)
-        Starts with /; root is /; no trailing / except root
-        No empty segments, no . / .., no \
-        Names: no /, no control chars, max 255
-        Case-sensitive, stored as typed (no lowercasing)
-        Invalid → 400, never "repair"
-         */
-        public bool TryNormalizePath(string? path, out string normalizedPath) //All AI btw
-        {
-            normalizedPath = string.Empty;
-
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return false;
-            }
-
-            // FormC (composed) is the usual choice for storing and comparing paths
-            string normalized = path.Trim().Normalize(NormalizationForm.FormC);
-
-            // Must be absolute
-            if (normalized[0] != '/')
-            {
-                return false;
-            }
-
-            // No backslashes anywhere
-            if (normalized.Contains('\\'))
-            {
-                return false;
-            }
-
-            // Root is valid on its own
-            if (normalized == "/")
-            {
-                normalizedPath = "/";
-                return true;
-            }
-
-            // Any other path must not end with '/'
-            if (normalized[^1] == '/')
-            {
-                return false;
-            }
-
-            // Check each segment as a whole
-            foreach (string segment in normalized.Substring(1).Split('/'))
-            {
-                if (segment.Length == 0 || segment == "." || segment == "..")
-                {
-                    return false;
-                }
-            }
-
-            normalizedPath = normalized;
-            return true;
-        }
-        public static (string parent, string name) SplitPath(string path)
-        {
-            int lastSlash = path.LastIndexOf('/');
-
-            string name = path.Substring(lastSlash + 1);
-            string parent = lastSlash == 0 ? "/" : path.Substring(0, lastSlash);
-
-            return (parent, name);
-        }
         public async Task<ServiceResult<List<GridFSFileOutput>>> GetDirectoryChildren(string userId, string parentPath) //takes path and lists everything inside the last element of the path IF that is a directory
         {
             string successfulNormalizedParentPath;
-            if (TryNormalizePath(parentPath, out string normalizedParentPath))
+            if (VirtualPath.TryNormalizePath(parentPath, out string normalizedParentPath))
             {
                 successfulNormalizedParentPath = normalizedParentPath;
             }
@@ -114,7 +49,7 @@ namespace cloud.api.Services
             using var cursor = await _bucket.FindAsync(filter);
             var files = await cursor.ToListAsync();
 
-            if(files == null)
+            if (files == null)
             {
                 return new ServiceResult<List<GridFSFileOutput>>(ResultReturn.NotFound);
             }
@@ -135,24 +70,24 @@ namespace cloud.api.Services
             */
             return new ServiceResult<List<GridFSFileOutput>>(ResultReturn.OK, outputFilesList);
         }
-        public async Task<bool> CheckIfParentIsDir(string parentPath, string userId)  
+        public async Task<bool> CheckIfParentIsDir(string parentPath, string userId)
         {
             //need to normalize path/
             //always include userId anyways/
             //Check if full path (plus fileName) even exists in the first place)/
             //Check if each index of the path is of type directory
 
-            if (!TryNormalizePath(parentPath, out string normalizedParentPath))
+            if (!VirtualPath.TryNormalizePath(parentPath, out string normalizedParentPath))
             {
                 return false;
             }
             var builder = Builders<GridFSFileInfo>.Filter;
 
-            string[] pathElements = normalizedParentPath.Split('/', StringSplitOptions.RemoveEmptyEntries); 
-            
+            string[] pathElements = normalizedParentPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
             //string lastElement = string.Empty;
             string pathUntilNow = "/";
-            foreach (var pathElement in pathElements ) 
+            foreach (var pathElement in pathElements)
             {
                 var filter2 = builder.Eq("metadata.folderName", pathElement) &
                         builder.Eq("metadata.parent", pathUntilNow) &
@@ -160,7 +95,7 @@ namespace cloud.api.Services
                         builder.Eq("metadata.type", UploadType.Dir);
                 using var cursor = await _bucket.FindAsync(filter2); //still really really need to freaking learn what a cursor is
                 var files = await cursor.ToListAsync();
-                if(files.Count == 0)
+                if (files.Count == 0)
                 {
                     return false;
                 }
@@ -172,16 +107,16 @@ namespace cloud.api.Services
                 else
                 {
                     pathUntilNow = $"{pathUntilNow}/{pathElement}";
-                }   
+                }
             }
             return true;
         }
-        public async Task<ServiceResult<UploadResult>> UploadFileAsync(IFormFile? file, string destinationPath, string ownerId, string ownerName, Dictionary<string, FilePermissions>permissions) //currently susceptible to filename injections tho
+        public async Task<ServiceResult<UploadResult>> UploadFileAsync(IFormFile? file, string destinationPath, string ownerId, string ownerName, Dictionary<string, FilePermissions> permissions) //currently susceptible to filename injections tho
         {
             string fileName = file.FileName;
             string successfulNormalizedParentPath;
 
-            if(TryNormalizePath(destinationPath, out string normalizedParentPath))
+            if (VirtualPath.TryNormalizePath(destinationPath, out string normalizedParentPath))
             {
                 successfulNormalizedParentPath = normalizedParentPath;
             }
@@ -219,7 +154,7 @@ namespace cloud.api.Services
                 {
                     { "ownerId", ownerId },
                     { "parent", successfulNormalizedParentPath }, //if root this should be /
-                    { "fileName", fileName }, //put outside of Metadata? No
+                    { "fileName", fileName }, //put outside of Metadata? //ts actually redundant
                     { "type", UploadType.File },
                     { "contentType", file.ContentType },
                     { "permission", permissions.ToBsonDocument() }
@@ -232,7 +167,7 @@ namespace cloud.api.Services
         public async Task<ServiceResult<UploadResult>> UploadFolderAsync(string destinationPath, string folderName, string ownerId, string ownerName, Dictionary<string, FilePermissions> permissions) //currently susceptible to filename injections tho
         {
             string successfulNormalizedParentPath;
-            if (TryNormalizePath(destinationPath, out string normalizedParentPath))
+            if (VirtualPath.TryNormalizePath(destinationPath, out string normalizedParentPath))
             {
                 successfulNormalizedParentPath = normalizedParentPath;
             }
@@ -263,9 +198,9 @@ namespace cloud.api.Services
                 {
                     { "ownerId", ownerId },
                     { "parent", successfulNormalizedParentPath },
-                    { "folderName", folderName }, 
+                    { "folderName", folderName },
                     { "type", UploadType.Dir },
-                    { "permission", permissions.ToBsonDocument() } 
+                    { "permission", permissions.ToBsonDocument() }
                 }
             };
             var fileId = await _bucket.UploadFromStreamAsync(folderName, emptyMemoryStream, fileOptions); //typo on purpose: need to implement parent is dir check in all endpoints
@@ -276,10 +211,10 @@ namespace cloud.api.Services
             try
             {
                 var builder = Builders<GridFSFileInfo>.Filter;
-                ObjectId objectId = ObjectId.Parse(fileId);
+                ObjectId.TryParse(fileId, out ObjectId objectId);
 
                 var filter = builder.Eq("metadata.ownerId", userId) &
-                             builder.Eq(x => x.Id, objectId);
+                             builder.Eq(x => x.Id, objectId); //need to learn what this is
                 var fileInfo = await _bucket.Find(filter).FirstOrDefaultAsync();
 
                 if (fileInfo == null)
@@ -291,23 +226,24 @@ namespace cloud.api.Services
                 var stream = await _bucket.OpenDownloadStreamAsync(fileInfo.Id);
 
                 var filename = stream.FileInfo.Filename;
-                var contentType = stream.FileInfo.Metadata?["contentType"]?.AsString
-                                     ?? "application/octet-stream";
+                var contentType = fileInfo.Metadata.GetValue("contentType", "application/octet-stream").AsString;
+                    /*stream.FileInfo.Metadata?["contentType"]?.AsString
+                                     ?? "application/octet-stream";*/
 
                 return new ServiceResult<GridFSFileResult?>(ResultReturn.OK, new GridFSFileResult(stream, filename, contentType));
             }
-            catch(GridFSFileNotFoundException)
+            catch (GridFSFileNotFoundException)
             {
                 return new ServiceResult<GridFSFileResult?>(ResultReturn.NotFound);
-            }   
+            }
         }
         public async Task<ServiceResult<GridFSFileResult?>> TryGetFileByPath(string fullPath, string userId) //OPEN: implement handling
         {
-            if (!TryNormalizePath(fullPath, out string normalizedFullPath))
+            if (!VirtualPath.TryNormalizePath(fullPath, out string normalizedFullPath))
             {
                 return new ServiceResult<GridFSFileResult?>(ResultReturn.BadRequest);
             }
-            (string parentPath, string fileName) results = SplitPath(normalizedFullPath); //programmed at 3:12 am Btw
+            (string parentPath, string fileName) results = VirtualPath.SplitPath(normalizedFullPath); //programmed at 3:12 am Btw
             /*
             if (await CheckIfParentIsDir(results.parentPath, userId)) //unneccesary
             {
@@ -335,67 +271,164 @@ namespace cloud.api.Services
             {
                 return new ServiceResult<GridFSFileResult?>(ResultReturn.NotFound);
             }
-        }     
-    }
-
-    public record GridFSFileResult
-    (
-        GridFSDownloadStream? Stream = null,
-        string? Filename = null,
-        string? ContentType = null
-    );
-    public record UploadResult
-    (
-        string uploadId
-    );
-
-    public record ServiceResult<T>(ResultReturn result, T? Value = default); //NICE
-    public class GridFSFileOutput
-    {
-        public GridFSFileOutput(string id, string name, string type, long size, DateTime uploadDate) //yes I know this is cursed as hell but I wasted enough time getting the google AI to tell me what the way is to populate the object in the foreach loop in GetDirectoryChildren()
-        {
-            Id = id;
-            Name = name;
-            Type = type;
-            Size = size;
-            UploadDate = uploadDate;
-
         }
-        public string Id {  get; set; }
-        public string Name { get; set; }
-        public string Type { get; set; }
-        public long Size { get; set; }
-        public DateTime UploadDate { get; set; }
-    }
-    public enum UploadType 
-    {
-        File,
-        Dir
-    }
-    public enum FilePermissions
-    {
-        Read,
-        ReadWrite
-    }
+        public async Task<ResultReturn> TryDeleteFileById(ObjectId ObjId, string userId)
+        {
+            var builder = Builders<GridFSFileInfo>.Filter;
+            var filter = builder.Eq("metadata.ownerId", userId) &
+                         builder.Eq(x => x.Id, ObjId);
+            var fileInfo = await _bucket.Find(filter).FirstOrDefaultAsync();
+            if (fileInfo == null)
+            {
+                return ResultReturn.NotFound;
+            }
+            //check if its a folder and contains children
+            var type = (UploadType)fileInfo.Metadata["type"].AsInt32;
+            string parentPath = fileInfo.Metadata["parent"].AsString;
 
-    public enum ResultReturn
-    {
-        OK,
-        Forbidden,
-        BadRequest,
-        NotFound,
-        Conflict
-    }
+            if (type == UploadType.Dir)
+            {
+                var result = await GetDirectoryChildren(userId, parentPath);
+                if (result.result != ResultReturn.OK)
+                {
+                    return ResultReturn.Conflict;
+                }
+            }
+            await _bucket.DeleteAsync(fileInfo.Id);
+
+            return ResultReturn.OK;
+        }
+        public async Task<ResultReturn> TryDeleteFileByPath(string path, string userId)
+        {
+            (string parent, string fileName) results = VirtualPath.SplitPath(path);
+            var builder = Builders<GridFSFileInfo>.Filter;
+            var filter = builder.Eq("metadata.ownerId", userId) &
+                         builder.Eq("metadata.parent", results.parent) &
+                         builder.Eq("metadata.fileName", results.fileName);
+            var fileInfo = await _bucket.Find(filter).FirstOrDefaultAsync();
+            if (fileInfo == null)
+            {
+                return ResultReturn.NotFound;
+            }
+            await _bucket.DeleteAsync(fileInfo.Id); //file not found file id 1
+
+            return ResultReturn.OK;
+        }
+        public async Task<ServiceResult<GridFSFileInfo>> TryGetFileMetaDataByPath(string fullPath, string userId)
+        {
+            if (!VirtualPath.TryNormalizePath(fullPath, out string normalizedFullPath))
+            {
+                return new ServiceResult<GridFSFileInfo>(ResultReturn.BadRequest);
+            }
+            (string parentPath, string fileName) results = VirtualPath.SplitPath(normalizedFullPath); //programmed at 3:12 am Btw
+            /*
+            if (await CheckIfParentIsDir(results.parentPath, userId)) //unneccesary
+            {
+                return new GridFSFileResult(ResultReturn.BadRequest, null, null, null);
+            }*/
+            var builder = Builders<GridFSFileInfo>.Filter;
+            var filter = builder.Eq("metadata.ownerId", userId) &
+                         builder.Eq("metadata.parent", results.parentPath) &
+                         builder.Eq("metadata.fileName", results.fileName);
+            try
+            {
+                var fileInfo = await _bucket.Find(filter).FirstOrDefaultAsync();
+
+                if (fileInfo == null) { return new ServiceResult<GridFSFileInfo?>(ResultReturn.NotFound); }
+
+                return new ServiceResult<GridFSFileInfo?>(ResultReturn.OK, fileInfo);
+            }
+            catch (System.IO.FileNotFoundException)
+            {
+                return new ServiceResult<GridFSFileInfo?>(ResultReturn.NotFound);
+            }
+        }
+        public async Task<ServiceResult<UploadResult>> UpdateFileContentAsync(IFormFile? file, string destinationPath, string ownerId, string ownerName, Dictionary<string, FilePermissions> permissions) //currently susceptible to filename injections tho
+        {
+            string fileName = file.FileName;
+            string successfulNormalizedParentPath;
+
+            if (VirtualPath.TryNormalizePath(destinationPath, out string normalizedParentPath))
+            {
+                successfulNormalizedParentPath = normalizedParentPath;
+            }
+            else
+            {
+                //throw new UnableToNormalizePathException("The path provided is malformed");
+                return new ServiceResult<UploadResult>(ResultReturn.BadRequest);
+            }
+
+            if (await CheckIfParentIsDir(destinationPath, ownerId) == false)
+            {
+                //throw new ParentPathContainsFileException("The path provided contains a file " + destinationPath);
+                return new ServiceResult<UploadResult>(ResultReturn.BadRequest);
+            }
+
+            //checking if the file maybe already exists
+            string fullPath = string.Empty;
+            if (successfulNormalizedParentPath == "/")
+            {
+                fullPath = $"/{fileName}";
+            }
+            else
+            {
+                fullPath = $"{successfulNormalizedParentPath}/{fileName}";
+            }
+            var resultingFileInfo = await TryGetFileMetaDataByPath(fullPath, ownerId); //REALLY memory inefficient I think, fix by adding new internal method for metadata
+
+            if (resultingFileInfo.result != ResultReturn.OK) //OPEN do a better chech later to ensure its really the same file
+            {
+                return new ServiceResult<UploadResult>(ResultReturn.NotFound);
+            }
+            ObjectId ObjectId = resultingFileInfo.Value.Id; //Mongo compatible
+
+            try
+            {
+                await TryDeleteFileById(ObjectId, ownerId);
+            }
+            catch
+            {
+                return new ServiceResult<UploadResult>(ResultReturn.Error);
+            }
+
+            using var stream = file.OpenReadStream();
+            var fileOptions = new GridFSUploadOptions
+            {
+                Metadata = new BsonDocument
+                {
+                    { "ownerId", ownerId },
+                    { "parent", successfulNormalizedParentPath }, //if root this should be /
+                    { "fileName", fileName }, //put outside of Metadata? No
+                    { "type", UploadType.File },
+                    { "contentType", file.ContentType },
+                    { "permission", permissions.ToBsonDocument() }
+                }
+            };
+
+            try
+            {
+                var fileId = await _bucket.UploadFromStreamAsync(file.FileName, stream, fileOptions);
+                return new ServiceResult<UploadResult>(ResultReturn.OK, new UploadResult(fileId.ToString()));
+            }
+            catch
+            {
+                return new ServiceResult<UploadResult>(ResultReturn.Error);
+            }
+        }
 
 
-    //these are AI tho
-    public class UnableToNormalizePathException : Exception
-    {
-        public UnableToNormalizePathException(string message) : base(message) { }
-    }
-
-    public class ParentPathContainsFileException : Exception
-    {
-        public ParentPathContainsFileException(string message) : base(message) { }
+        /*public async Task<ResultReturn> TryUpdateFileContentById(IFormFile file, string userId)
+        {
+            var builder = Builders<GridFSFileInfo>.Filter;
+            ObjectId objectId = ObjectId.Parse(fileId);
+            var filter = builder.Eq("metadata.ownerId", userId) &
+                         builder.Eq(x => x.Id, objectId);
+            var fileInfo = await _bucket.Find(filter).FirstOrDefaultAsync();
+            if (fileInfo == null)
+            {
+                return ResultReturn.NotFound;
+            }
+            await _bucket
+        }*/
     }
 }
