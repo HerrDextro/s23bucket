@@ -8,6 +8,7 @@ namespace cloud.api.Endpoints
     {
         public static void MapServiceEndpoints(this IEndpointRouteBuilder app)
         {
+            //Currently in development, does not have auth implemented for quick tests
             app.MapPost("/service/register", async (ExternalClientDto serviceDto, ExternalClientService serviceService) => //NO AUTH FOR NOW
             {
                 var externalClient = await serviceService.GetServiceByName(serviceDto.name);
@@ -20,11 +21,6 @@ namespace cloud.api.Endpoints
             })
             .RequireAuthorization();
 
-            app.MapGet("/service/getall", async (ExternalClientService serviceService) =>  //Only for debugging purposes, remove later
-            { 
-                var services = await serviceService.GetAllServices();
-                return Results.Ok(services);
-            });
 
             app.MapPost("/service/request", async ([FromBody]ResourceRequestDto requestDto, [FromServices]JWTService jwtService, ExternalClientService externalClientService) => 
             {
@@ -32,7 +28,6 @@ namespace cloud.api.Endpoints
 
                 var tempToken = jwtService.GenerateClientToken(requestId);
                 return Results.Ok(new { token = tempToken });
-
             });
         }
     }
