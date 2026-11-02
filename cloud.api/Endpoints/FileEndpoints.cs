@@ -42,14 +42,14 @@ namespace cloud.api.Endpoints
                 }
                 if (result.result == ResultReturn.NotFound)
                 {
-                    return Results.NotFound("Parent path contains inexistant parent directory");
+                    return Results.NotFound("The parent folder does not exist. Create it first with POST /folders.");
                 }
                 if (result.result == ResultReturn.Conflict)
                 {
-                    return Results.Conflict("File with the same filename already eixsts");
+                    return Results.Conflict("A file or folder with this name already exists in this folder.");
                 }
 
-                string locationUri = $"{metadata.ParentPath}/{metadata.File.FileName}";
+                string locationUri = $"/files/{result.Value.uploadId}"; //Location = the URL where the new file can be fetched
                 return Results.Created(locationUri, new { FileId = result.Value.uploadId });
             }) //find a way to put 507 in ts
             .DisableAntiforgery() //add everywhere because of the bearer token?
@@ -76,14 +76,14 @@ namespace cloud.api.Endpoints
                 }
                 if (result.result == ResultReturn.NotFound)
                 {
-                    return Results.NotFound("Parent path contains inexistant parent directory");
+                    return Results.NotFound("The parent folder does not exist. Create it first with POST /folders.");
                 }
                 if(result.result == ResultReturn.Conflict)
                 {
-                    return Results.Conflict("Folder with the same foldername already eixsts");
+                    return Results.Conflict("A file or folder with this name already exists in this folder.");
                 }
 
-                string locationUri = $"{metadata.ParentPath}/{metadata.FolderName}";
+                string locationUri = $"/files/{result.Value.uploadId}";
 
 
                 return Results.Created(locationUri, new { FileId = result.Value.uploadId });
@@ -99,14 +99,14 @@ namespace cloud.api.Endpoints
 
                 if (result.result == ResultReturn.BadRequest)
                 {
-                    return Results.BadRequest("Unable to normalize Path. The Filepath might be malformed."); //polite ahh return
+                    return Results.BadRequest("This is not a valid file id.");
                 }
                 if (result.result == ResultReturn.NotFound)
                 {
-                    return Results.NotFound("Parent path contains inexistant parent directory");
+                    return Results.NotFound("File not found.");
                 }
 
-                return Results.File(result.Value.Stream, result.Value.Filename, result.Value.ContentType);
+                return Results.File(result.Value.Stream, result.Value.ContentType, result.Value.Filename); //order is (stream, contentType, downloadName)
             })
             .RequireAuthorization();
 
@@ -122,10 +122,10 @@ namespace cloud.api.Endpoints
                 }
                 if (result.result == ResultReturn.NotFound)
                 {
-                    return Results.NotFound("Parent path contains inexistant parent directory");
+                    return Results.NotFound("File not found.");
                 }
 
-                return Results.File(result.Value.Stream, result.Value.Filename, result.Value.ContentType);
+                return Results.File(result.Value.Stream, result.Value.ContentType, result.Value.Filename); //order is (stream, contentType, downloadName)
             })
             .RequireAuthorization();
 
@@ -140,21 +140,28 @@ namespace cloud.api.Endpoints
                 }
                 if (result.result == ResultReturn.NotFound)
                 {
-                    return Results.NotFound();
+                    return Results.NotFound("Folder not found.");
                 }
-                return Results.Ok(result);
+                return Results.Ok(result.Value); //only the list, not the whole ServiceResult wrapper
             })
             .RequireAuthorization();
 
             //DELETE files by file id
             app.MapDelete("/files/delete/{id}", async (string id, ClaimsPrincipal userClaim, FileService fileService) =>
             {
-                ObjectId objectId = ObjectId.Parse(id);
+                if (!ObjectId.TryParse(id, out ObjectId objectId)) //Parse throws on garbage input -> 500
+                {
+                    return Results.BadRequest("This is not a valid file id.");
+                }
                 var userId = userClaim.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 var result = await fileService.TryDeleteFileById(objectId, userId);
                 if (result == ResultReturn.NotFound)
                 {
-                    return Results.NotFound();
+                    return Results.NotFound("File or folder not found.");
+                }
+                if (result == ResultReturn.Conflict)
+                {
+                    return Results.Conflict("This folder is not empty. Delete its contents first.");
                 }
                 return Results.NoContent(); //since I dont plan on a response body
             })
@@ -165,9 +172,17 @@ namespace cloud.api.Endpoints
             {
                 var userId = userClaim.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 var result = await fileService.TryDeleteFileByPath(path, userId);
+                if (result == ResultReturn.BadRequest)
+                {
+                    return Results.BadRequest("Unable to normalize Path. The Filepath might be malformed.");
+                }
                 if (result == ResultReturn.NotFound)
                 {
-                    return Results.NotFound();
+                    return Results.NotFound("File or folder not found.");
+                }
+                if (result == ResultReturn.Conflict)
+                {
+                    return Results.Conflict("This folder is not empty. Delete its contents first.");
                 }
                 return Results.NoContent(); //since I dont plan on a response body
             })
@@ -199,19 +214,18 @@ namespace cloud.api.Endpoints
                 }
                 if (result.result == ResultReturn.NotFound)
                 {
-                    return Results.NotFound("Parent path contains inexistant parent directory");
+                    return Results.NotFound("There is no file with this name in this folder. Use POST /files to upload a new one.");
                 }
                 if (result.result == ResultReturn.Conflict)
                 {
-                    return Results.Conflict("File with the same filename already eixsts");
+                    return Results.Conflict("This is a folder, it can't be replaced with a file.");
                 }
                 if (result.result == ResultReturn.Error)
                 {
-                    return Results.InternalServerError("Cannot upload file to storage");
+                    return Results.InternalServerError("Cannot upload file to storage. The old file is unchanged.");
                 }
 
-                string locationUri = $"{metadata.ParentPath}/{metadata.File.FileName}";
-                return Results.Created(locationUri, new { FileId = result.Value.uploadId });
+                return Results.Ok(new { FileId = result.Value.uploadId }); //200 not 201: an existing file was replaced. Its id changed, so we send the new one
             })
             .DisableAntiforgery() //add everywhere because of the bearer token?
             .RequireAuthorization();
