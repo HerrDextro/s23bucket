@@ -36,21 +36,14 @@ namespace cloud.api.Endpoints
                 permissions.Add(userId, FilePermissions.ReadWrite);
 
                 ServiceResult<UploadResult> result = await fileService.UploadFileAsync(metadata.File, metadata.ParentPath, userId, userName, permissions);
-                if(result.result == ResultReturn.BadRequest)
+                //string locationUri = $"/files/{result.Value.uploadId}"; //Location = the URL where the new file can be fetched
+                string locationUri = string.Empty;
+                if (result.Value != null)
                 {
-                    return Results.BadRequest("Unable to normalize Path. The Filepath might be malformed."); //polite ahh return
-                }
-                if (result.result == ResultReturn.NotFound)
-                {
-                    return Results.NotFound("The parent folder does not exist. Create it first with POST /folders.");
-                }
-                if (result.result == ResultReturn.Conflict)
-                {
-                    return Results.Conflict("A file or folder with this name already exists in this folder.");
+                    locationUri = $"/files/{result.Value.uploadId}";
                 }
 
-                string locationUri = $"/files/{result.Value.uploadId}"; //Location = the URL where the new file can be fetched
-                return Results.Created(locationUri, new { FileId = result.Value.uploadId });
+                return ResultHelper(result, x => Results.Created(locationUri, new { FileId = result.Value.uploadId }));
             }) //find a way to put 507 in ts
             .DisableAntiforgery() //add everywhere because of the bearer token?
             .RequireAuthorization();
@@ -70,24 +63,13 @@ namespace cloud.api.Endpoints
                 permissions.Add(userId, FilePermissions.ReadWrite);
 
                 ServiceResult<UploadResult> result = await fileService.UploadFolderAsync(metadata.ParentPath, metadata.FolderName, userId, userName, permissions);
-                if (result.result == ResultReturn.BadRequest)
+                string locationUri = string.Empty;
+                if (result.Value != null)
                 {
-                    return Results.BadRequest("Unable to normalize Path. The Filepath might be malformed."); //polite ahh return
-                }
-                if (result.result == ResultReturn.NotFound)
-                {
-                    return Results.NotFound("The parent folder does not exist. Create it first with POST /folders.");
-                }
-                if(result.result == ResultReturn.Conflict)
-                {
-                    return Results.Conflict("A file or folder with this name already exists in this folder.");
+                    locationUri = $"/files/{result.Value.uploadId}";
                 }
 
-                string locationUri = $"/files/{result.Value.uploadId}";
-
-
-                return Results.Created(locationUri, new { FileId = result.Value.uploadId });
-
+                return ResultHelper(result, x => Results.Created(locationUri, new { FileId = result.Value.uploadId }));
             })
             .RequireAuthorization();
 
@@ -97,16 +79,7 @@ namespace cloud.api.Endpoints
                 var userId = userClaim.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 var result = await fileService.TryGetFileById(id, userId);
 
-                if (result.result == ResultReturn.BadRequest)
-                {
-                    return Results.BadRequest("This is not a valid file id.");
-                }
-                if (result.result == ResultReturn.NotFound)
-                {
-                    return Results.NotFound("File not found.");
-                }
-
-                return Results.File(result.Value.Stream, result.Value.ContentType, result.Value.Filename); //order is (stream, contentType, downloadName)
+                return ResultHelper(result, x => Results.File(result.Value.Stream, result.Value.ContentType, result.Value.Filename));
             })
             .RequireAuthorization();
 
@@ -115,17 +88,7 @@ namespace cloud.api.Endpoints
             {
                 var userId = userClaim.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 ServiceResult<GridFSFileResult?> result = await fileService.TryGetFileByPath(path, userId);
-
-                if (result.result == ResultReturn.BadRequest)
-                {
-                    return Results.BadRequest("Unable to normalize Path. The Filepath might be malformed."); //polite ahh return
-                }
-                if (result.result == ResultReturn.NotFound)
-                {
-                    return Results.NotFound("File not found.");
-                }
-
-                return Results.File(result.Value.Stream, result.Value.ContentType, result.Value.Filename); //order is (stream, contentType, downloadName)
+                return ResultHelper(result, x => Results.File(result.Value.Stream, result.Value.ContentType, result.Value.Filename));
             })
             .RequireAuthorization();
 
@@ -134,15 +97,7 @@ namespace cloud.api.Endpoints
             {
                 var userId = userClaims.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 var result = await fileService.GetDirectoryChildren(userId, path);
-                if (result.result == ResultReturn.BadRequest)
-                {
-                    return Results.BadRequest("Invalid parent path provided");
-                }
-                if (result.result == ResultReturn.NotFound)
-                {
-                    return Results.NotFound("Folder not found.");
-                }
-                return Results.Ok(result.Value); //only the list, not the whole ServiceResult wrapper
+                return ResultHelper(result, x => Results.Ok(result.Value)); //only the list, not the whole ServiceResult wrapper
             })
             .RequireAuthorization();
 
@@ -155,15 +110,7 @@ namespace cloud.api.Endpoints
                 }
                 var userId = userClaim.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 var result = await fileService.TryDeleteFileById(objectId, userId);
-                if (result == ResultReturn.NotFound)
-                {
-                    return Results.NotFound("File or folder not found.");
-                }
-                if (result == ResultReturn.Conflict)
-                {
-                    return Results.Conflict("This folder is not empty. Delete its contents first.");
-                }
-                return Results.NoContent(); //since I dont plan on a response body
+                return ResultHelper(result, () => Results.NoContent());
             })
             .RequireAuthorization();
 
@@ -172,19 +119,8 @@ namespace cloud.api.Endpoints
             {
                 var userId = userClaim.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 var result = await fileService.TryDeleteFileByPath(path, userId);
-                if (result == ResultReturn.BadRequest)
-                {
-                    return Results.BadRequest("Unable to normalize Path. The Filepath might be malformed.");
-                }
-                if (result == ResultReturn.NotFound)
-                {
-                    return Results.NotFound("File or folder not found.");
-                }
-                if (result == ResultReturn.Conflict)
-                {
-                    return Results.Conflict("This folder is not empty. Delete its contents first.");
-                }
-                return Results.NoContent(); //since I dont plan on a response body
+
+                return ResultHelper(result, ()=> Results.NoContent()); //since I dont plan on a response body
             })
             .RequireAuthorization();
 
@@ -196,39 +132,59 @@ namespace cloud.api.Endpoints
                     return Results.BadRequest("No file was uploaded.");
                 }
 
-                var userName = userClaim.Identity?.Name;
+                //var userName = userClaim.Identity?.Name;
                 var userId = userClaim.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
                 if (userId == null) //ask big C abt this
                 {
                     return Results.Unauthorized();
                 }
+                ServiceResult<UploadResult> result = await fileService.UpdateFileContentAsync(metadata.File, metadata.ParentPath, userId);
 
-                var permissions = new Dictionary<string, FilePermissions>();
-                permissions.Add(userId, FilePermissions.ReadWrite);
-
-                ServiceResult<UploadResult> result = await fileService.UpdateFileContentAsync(metadata.File, metadata.ParentPath, userId, userName, permissions);
-                if (result.result == ResultReturn.BadRequest)
-                {
-                    return Results.BadRequest("Unable to normalize Path. The Filepath might be malformed."); //polite ahh return
-                }
-                if (result.result == ResultReturn.NotFound)
-                {
-                    return Results.NotFound("There is no file with this name in this folder. Use POST /files to upload a new one.");
-                }
-                if (result.result == ResultReturn.Conflict)
-                {
-                    return Results.Conflict("This is a folder, it can't be replaced with a file.");
-                }
-                if (result.result == ResultReturn.Error)
-                {
-                    return Results.InternalServerError("Cannot upload file to storage. The old file is unchanged.");
-                }
-
-                return Results.Ok(new { FileId = result.Value.uploadId }); //200 not 201: an existing file was replaced. Its id changed, so we send the new one
+                return ResultHelper(result, success => Results.Ok(new { FileId = result.Value.uploadId })); //200 not 201: an existing file was replaced. Its id changed, so we send the new one
             })
             .DisableAntiforgery() //add everywhere because of the bearer token?
             .RequireAuthorization();
+
+            //update file metadata by path (file only for now until child updating is implemented
+            app.MapPatch("/files", async (FilePatchDto filePatchDto, ClaimsPrincipal userClaim, FileService fileService) => 
+            { 
+                var userId = userClaim.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                var result = await fileService.UpdateFileMetadataByPath(userId, filePatchDto.OriginPath, filePatchDto.TargetParent, filePatchDto.TargetFileName);
+
+                return ResultHelper(result, x => Results.NoContent());
+            })
+            .RequireAuthorization();
         }
+        public static IResult ResultHelper<T>(ServiceResult<T> serviceResult, Func<T, IResult> onSuccess) //AI helped me with this //yeah no wait a second why do I even have the Resultreturn💀💀💀
+        {
+            return serviceResult.result switch
+            {
+                ResultReturn.OK => onSuccess(serviceResult.Value!),                         // 2xx, built by the endpoint
+                ResultReturn.BadRequest => Results.BadRequest(serviceResult.message),         // 400
+                ResultReturn.Forbidden => Results.Forbid(),                                   // 403
+                ResultReturn.NotFound => Results.NotFound(serviceResult.message),             // 404
+                ResultReturn.Conflict => Results.Conflict(serviceResult.message),             // 409
+                ResultReturn.Error => Results.InternalServerError(serviceResult.message),     // 500
+                _ => Results.InternalServerError()                                            // unhandled value = bug
+            };
+        }
+        public static IResult ResultHelper(ServiceResult serviceResult, Func<IResult> onSuccess)
+        {
+            return serviceResult.result switch
+            {
+                ResultReturn.OK => onSuccess(),                         // 2xx, built by the endpoint
+                ResultReturn.BadRequest => Results.BadRequest(serviceResult.message),         // 400
+                ResultReturn.Forbidden => Results.Forbid(),                                   // 403
+                ResultReturn.NotFound => Results.NotFound(serviceResult.message),             // 404
+                ResultReturn.Conflict => Results.Conflict(serviceResult.message),             // 409
+                ResultReturn.Error => Results.InternalServerError(serviceResult.message),     // 500
+                _ => Results.InternalServerError()                                            // unhandled value = bug
+            };
+        }
+
+        //usage of that monster
+        //return ResultHelper(result, file => Results.File(file.Stream, file.ContentType, file.Filename));
+        //return ResultHelper(result, upload => Results.Created($"/files/{upload.uploadId}", new { FileId = upload.uploadId }));
     }
 }

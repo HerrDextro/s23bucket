@@ -24,10 +24,12 @@ namespace cloud.api.Services
     {
         private GridFSBucket _bucket;
         private IMongoDatabase _db;
+        private readonly IMongoCollection<BsonDocument> _fsFiles;
         public FileService(IMongoClient mongoClient, IOptions<MongoSettings> settings)
         {
             _db = mongoClient.GetDatabase(settings.Value.MainDatabase);
             _bucket = new GridFSBucket(_db);
+            _fsFiles = _db.GetCollection<BsonDocument>("fs.files");
         }
         public async Task<ServiceResult<List<GridFSFileOutput>>> GetDirectoryChildren(string userId, string parentPath) //takes path and lists everything inside the last element of the path IF that is a directory
         {
@@ -38,7 +40,7 @@ namespace cloud.api.Services
             }
             else
             {
-                return new ServiceResult<List<GridFSFileOutput>>(ResultReturn.BadRequest);
+                return new ServiceResult<List<GridFSFileOutput>>(ResultReturn.BadRequest, "The path is malformed.", null);
             }
 
             //bool normalizeSuccess = TryNormalizePath(path, out string normalizedPath);
@@ -48,7 +50,7 @@ namespace cloud.api.Services
 
             if (!await CheckIfParentIsDir(successfulNormalizedParentPath, userId)) //ToListAsync never returns null, so check that the folder exists
             {
-                return new ServiceResult<List<GridFSFileOutput>>(ResultReturn.NotFound);
+                return new ServiceResult<List<GridFSFileOutput>>(ResultReturn.NotFound, null);
             }
 
             using var cursor = await _bucket.FindAsync(filter);
@@ -68,7 +70,7 @@ namespace cloud.api.Services
                 Console.WriteLine($"{file.Filename} -> {file.Metadata["path"]}");
             }
             */
-            return new ServiceResult<List<GridFSFileOutput>>(ResultReturn.OK, outputFilesList);
+            return new ServiceResult<List<GridFSFileOutput>>(ResultReturn.OK, null, outputFilesList);
         }
         public async Task<bool> CheckIfParentIsDir(string parentPath, string userId)
         {
@@ -113,7 +115,10 @@ namespace cloud.api.Services
         }
         public async Task<ServiceResult<UploadResult>> UploadFileAsync(IFormFile? file, string destinationPath, string ownerId, string ownerName, Dictionary<string, FilePermissions> permissions) //currently susceptible to filename injections tho
         {
-            string fileName = file.FileName;
+            if (!VirtualPath.TryNormalizeFileName(file.FileName, out string fileName))
+            {
+                return new ServiceResult<UploadResult>(ResultReturn.BadRequest, null);
+            }
             string successfulNormalizedParentPath;
 
             if (VirtualPath.TryNormalizePath(destinationPath, out string normalizedParentPath))
@@ -123,13 +128,12 @@ namespace cloud.api.Services
             else
             {
                 //throw new UnableToNormalizePathException("The path provided is malformed");
-                return new ServiceResult<UploadResult>(ResultReturn.BadRequest);
+                return new ServiceResult<UploadResult>(ResultReturn.BadRequest, "The path provided is malformed", null);
             }
 
             if (await CheckIfParentIsDir(destinationPath, ownerId) == false)
             {
-                //throw new ParentPathContainsFileException("The path provided contains a file " + destinationPath);
-                return new ServiceResult<UploadResult>(ResultReturn.NotFound); //parent folder doesnt exist -> 404
+                return new ServiceResult<UploadResult>(ResultReturn.NotFound, "The path provided contains an nonexistant directory", null); //parent folder doesnt exist -> 404
             }
 
             //checking if the file maybe already exists
@@ -142,15 +146,15 @@ namespace cloud.api.Services
             {
                 fullPath = $"{successfulNormalizedParentPath}/{fileName}";
             }
-            var result = await TryGetFileMetaDataByPath(fullPath, ownerId); //metadata only: doesnt open a download stream that never gets closed
+            var result = await TryGetFileMetadataByPath(fullPath, ownerId); //metadata only: doesnt open a download stream that never gets closed
             if (result.result == ResultReturn.OK)
             {
-                return new ServiceResult<UploadResult>(ResultReturn.Conflict);
+                return new ServiceResult<UploadResult>(ResultReturn.Conflict, null);
             }
             using var stream = file.OpenReadStream();
             var fileOptions = new GridFSUploadOptions
             {
-                Metadata = new BsonDocument //OPEN: later make into dedicated model?
+                /*Metadata = new BsonDocument //OPEN: later make into dedicated model?
                 {
                     { "ownerId", ownerId },
                     { "parent", successfulNormalizedParentPath }, //if root this should be /
@@ -158,14 +162,26 @@ namespace cloud.api.Services
                     { "type", UploadType.File },
                     { "contentType", file.ContentType },
                     { "permission", permissions.ToBsonDocument() }
-                }
+                }*/
+
+                Metadata = new FileOrFolderMetadata
+                {
+                    OwnerId = ownerId,
+                    Parent = successfulNormalizedParentPath,
+                    Type = UploadType.File,
+                    ContentType = file.ContentType,
+                    Permissions = permissions
+
+                }.ToBsonDocument()
             };
             var fileId = await _bucket.UploadFromStreamAsync(file.FileName, stream, fileOptions);
-            return new ServiceResult<UploadResult>(ResultReturn.OK, new UploadResult(fileId.ToString()));
+            return new ServiceResult<UploadResult>(ResultReturn.OK, null, new UploadResult(fileId.ToString()));
 
         }
         public async Task<ServiceResult<UploadResult>> UploadFolderAsync(string destinationPath, string folderName, string ownerId, string ownerName, Dictionary<string, FilePermissions> permissions) //currently susceptible to filename injections tho
         {
+            //OPEN: folder with the same name as file? check
+
             string successfulNormalizedParentPath;
             if (VirtualPath.TryNormalizePath(destinationPath, out string normalizedParentPath))
             {
@@ -173,38 +189,44 @@ namespace cloud.api.Services
             }
             else
             {
-                //throw new UnableToNormalizePathException("The path provided is malformed");
-                return new ServiceResult<UploadResult>(ResultReturn.BadRequest);
+                return new ServiceResult<UploadResult>(ResultReturn.BadRequest, "The path provided is malformed.", null);
             }
 
             if (await CheckIfParentIsDir(destinationPath, ownerId) == false)
             {
-                //throw new ParentPathContainsFileException("The path provided contains a file " + destinationPath);
-                return new ServiceResult<UploadResult>(ResultReturn.NotFound); //parent folder doesnt exist -> 404
+                return new ServiceResult<UploadResult>(ResultReturn.NotFound, "The path provided contains a file " + destinationPath, null); //parent folder doesnt exist -> 404
+            }
+
+            if (!VirtualPath.TryNormalizeFileName(folderName, out string normalizedFolderName))
+            {
+                return new ServiceResult<UploadResult>(ResultReturn.BadRequest, null);
             }
 
             //checking if a folder with the same name in the same dir maybe already exists
             var result = await GetDirectoryChildren(ownerId, successfulNormalizedParentPath);
             foreach (var child in result.Value)
             {
-                if (child.Name == folderName) { return new ServiceResult<UploadResult>(ResultReturn.Conflict); }
+                if (child.Name == normalizedFolderName) { return new ServiceResult<UploadResult>(ResultReturn.Conflict, null, null); } //bother... forgot the second null
             }
 
             Stream emptyMemoryStream = Stream.Null;
 
             var fileOptions = new GridFSUploadOptions
             {
-                Metadata = new BsonDocument //OPEN: later make into dedicated model?
+                Metadata = new FileOrFolderMetadata
                 {
-                    { "ownerId", ownerId },
-                    { "parent", successfulNormalizedParentPath },
-                    { "folderName", folderName },
-                    { "type", UploadType.Dir },
-                    { "permission", permissions.ToBsonDocument() }
-                }
+                    OwnerId = ownerId,
+                    Parent = successfulNormalizedParentPath,
+                    Type = UploadType.Dir,
+                    Permissions = permissions
+
+                }.ToBsonDocument()
             };
-            var fileId = await _bucket.UploadFromStreamAsync(folderName, emptyMemoryStream, fileOptions); //typo on purpose: need to implement parent is dir check in all endpoints
-            return new ServiceResult<UploadResult>(ResultReturn.OK, new UploadResult(fileId.ToString()));
+            var fileId = await _bucket.UploadFromStreamAsync(folderName, emptyMemoryStream, fileOptions); 
+
+
+
+            return new ServiceResult<UploadResult>(ResultReturn.OK, null, new UploadResult(fileId.ToString()));
         }
         public async Task<ServiceResult<GridFSFileResult?>> TryGetFileById(string fileId, string userId) //change ts to implement the cleaner tuple without contentType
         {
@@ -213,37 +235,42 @@ namespace cloud.api.Services
                 var builder = Builders<GridFSFileInfo>.Filter;
                 if (!ObjectId.TryParse(fileId, out ObjectId objectId))
                 {
-                    return new ServiceResult<GridFSFileResult?>(ResultReturn.BadRequest); //not a valid id at all
+                    return new ServiceResult<GridFSFileResult?>(ResultReturn.BadRequest, null, null); //not a valid id at all
                 }
 
+                //ObjectId.TryParse("6af0f7dabf79a6dc7d59a92c", out ObjectId id);
+                //var fileId123 = new ObjectId("6af0f7dabf79a6dc7d59a92c");
+                //var filter123 = builder.Eq(f => f.Id, id);
                 var filter = builder.Eq("metadata.ownerId", userId) &
-                             builder.Eq(x => x.Id, objectId); //need to learn what this is
+                             builder.Eq("metadata.type", UploadType.File) &
+                             builder.Eq(f => f.Id, objectId);
+
                 var fileInfo = await _bucket.Find(filter).FirstOrDefaultAsync();
 
                 if (fileInfo == null)
                 {
-                    return new ServiceResult<GridFSFileResult?>(ResultReturn.NotFound); //doesnt exist or isnt yours: 404 either way
+                    return new ServiceResult<GridFSFileResult?>(ResultReturn.NotFound, null); 
                 }
 
                 var stream = await _bucket.OpenDownloadStreamAsync(fileInfo.Id);
 
                 var filename = stream.FileInfo.Filename;
                 var contentType = fileInfo.Metadata.GetValue("contentType", "application/octet-stream").AsString;
-                    /*stream.FileInfo.Metadata?["contentType"]?.AsString
-                                     ?? "application/octet-stream";*/
+                /*stream.FileInfo.Metadata?["contentType"]?.AsString
+                                 ?? "application/octet-stream";*/
 
-                return new ServiceResult<GridFSFileResult?>(ResultReturn.OK, new GridFSFileResult(stream, filename, contentType));
+                return new ServiceResult<GridFSFileResult?>(ResultReturn.OK, null, new GridFSFileResult(stream, filename, contentType));
             }
             catch (GridFSFileNotFoundException)
             {
-                return new ServiceResult<GridFSFileResult?>(ResultReturn.NotFound);
+                return new ServiceResult<GridFSFileResult?>(ResultReturn.NotFound, null);
             }
         }
         public async Task<ServiceResult<GridFSFileResult?>> TryGetFileByPath(string fullPath, string userId) //OPEN: implement handling
         {
             if (!VirtualPath.TryNormalizePath(fullPath, out string normalizedFullPath))
             {
-                return new ServiceResult<GridFSFileResult?>(ResultReturn.BadRequest);
+                return new ServiceResult<GridFSFileResult?>(ResultReturn.BadRequest, "The path provided is malformed.", null);
             }
             (string parentPath, string fileName) results = VirtualPath.SplitPath(normalizedFullPath); //programmed at 3:12 am Btw
             /*
@@ -260,20 +287,20 @@ namespace cloud.api.Services
                 // 2. Find the file info document matching your metadata
                 var fileInfo = await _bucket.Find(filter).FirstOrDefaultAsync();
 
-                if (fileInfo == null) { return new ServiceResult<GridFSFileResult?>(ResultReturn.NotFound); }
+                if (fileInfo == null) { return new ServiceResult<GridFSFileResult?>(ResultReturn.NotFound, null); }
 
                 // 3. Open the stream using the found file's unique _id
                 var stream = await _bucket.OpenDownloadStreamAsync(fileInfo.Id);
                 var contentType = fileInfo.Metadata.GetValue("contentType", "application/octet-stream").AsString; //indexer would throw for folders/old files without contentType
 
-                return new ServiceResult<GridFSFileResult?>(ResultReturn.OK, new GridFSFileResult(stream, fileInfo.Filename, contentType));
+                return new ServiceResult<GridFSFileResult?>(ResultReturn.OK, null, new GridFSFileResult(stream, fileInfo.Filename, contentType));
             }
             catch (System.IO.FileNotFoundException)
             {
-                return new ServiceResult<GridFSFileResult?>(ResultReturn.NotFound);
+                return new ServiceResult<GridFSFileResult?>(ResultReturn.NotFound, null);
             }
         }
-        public async Task<ResultReturn> TryDeleteFileById(ObjectId ObjId, string userId)
+        public async Task<ServiceResult> TryDeleteFileById(ObjectId ObjId, string userId)
         {
             var builder = Builders<GridFSFileInfo>.Filter;
             var filter = builder.Eq("metadata.ownerId", userId) &
@@ -281,7 +308,7 @@ namespace cloud.api.Services
             var fileInfo = await _bucket.Find(filter).FirstOrDefaultAsync();
             if (fileInfo == null)
             {
-                return ResultReturn.NotFound;
+                return new ServiceResult(ResultReturn.NotFound);
             }
             //check if its a folder and contains children
             var type = (UploadType)fileInfo.Metadata["type"].AsInt32;
@@ -294,18 +321,18 @@ namespace cloud.api.Services
                 var result = await GetDirectoryChildren(userId, folderPath);
                 if (result.result != ResultReturn.OK || result.Value.Count > 0)
                 {
-                    return ResultReturn.Conflict; //not empty: deleting it would orphan its children
+                    return new ServiceResult(ResultReturn.Conflict); //not empty: deleting it would orphan its children
                 }
             }
             await _bucket.DeleteAsync(fileInfo.Id);
 
-            return ResultReturn.OK;
+            return new ServiceResult(ResultReturn.OK);
         }
-        public async Task<ResultReturn> TryDeleteFileByPath(string path, string userId)
+        public async Task<ServiceResult> TryDeleteFileByPath(string path, string userId)
         {
             if (!VirtualPath.TryNormalizePath(path, out string normalizedPath))
             {
-                return ResultReturn.BadRequest;
+                return new ServiceResult(ResultReturn.BadRequest);
             }
             (string parent, string fileName) results = VirtualPath.SplitPath(normalizedPath);
             var builder = Builders<GridFSFileInfo>.Filter;
@@ -315,15 +342,15 @@ namespace cloud.api.Services
             var fileInfo = await _bucket.Find(filter).FirstOrDefaultAsync();
             if (fileInfo == null)
             {
-                return ResultReturn.NotFound;
+                return new ServiceResult(ResultReturn.NotFound);
             }
             return await TryDeleteFileById(fileInfo.Id, userId); //reuse: same "folder must be empty" check as delete by id
         }
-        public async Task<ServiceResult<GridFSFileInfo>> TryGetFileMetaDataByPath(string fullPath, string userId)
+        public async Task<ServiceResult<GridFSFileInfo>> TryGetFileMetadataByPath(string fullPath, string userId)
         {
             if (!VirtualPath.TryNormalizePath(fullPath, out string normalizedFullPath))
             {
-                return new ServiceResult<GridFSFileInfo>(ResultReturn.BadRequest);
+                return new ServiceResult<GridFSFileInfo>(ResultReturn.BadRequest, null);
             }
             (string parentPath, string fileName) results = VirtualPath.SplitPath(normalizedFullPath); //programmed at 3:12 am Btw
             /*
@@ -339,16 +366,16 @@ namespace cloud.api.Services
             {
                 var fileInfo = await _bucket.Find(filter).FirstOrDefaultAsync();
 
-                if (fileInfo == null) { return new ServiceResult<GridFSFileInfo?>(ResultReturn.NotFound); }
+                if (fileInfo == null) { return new ServiceResult<GridFSFileInfo?>(ResultReturn.NotFound, null); }
 
-                return new ServiceResult<GridFSFileInfo?>(ResultReturn.OK, fileInfo);
+                return new ServiceResult<GridFSFileInfo?>(ResultReturn.OK, null, fileInfo);
             }
             catch (System.IO.FileNotFoundException)
             {
-                return new ServiceResult<GridFSFileInfo?>(ResultReturn.NotFound);
+                return new ServiceResult<GridFSFileInfo?>(ResultReturn.NotFound, null);
             }
         }
-        public async Task<ServiceResult<UploadResult>> UpdateFileContentAsync(IFormFile? file, string destinationPath, string ownerId, string ownerName, Dictionary<string, FilePermissions> permissions) //currently susceptible to filename injections tho
+        public async Task<ServiceResult<UploadResult>> UpdateFileContentAsync(IFormFile? file, string destinationPath, string ownerId) //currently susceptible to filename injections tho
         {
             string fileName = file.FileName;
             string successfulNormalizedParentPath;
@@ -359,14 +386,12 @@ namespace cloud.api.Services
             }
             else
             {
-                //throw new UnableToNormalizePathException("The path provided is malformed");
-                return new ServiceResult<UploadResult>(ResultReturn.BadRequest);
+                return new ServiceResult<UploadResult>(ResultReturn.BadRequest, "The path provided is malformed", null);
             }
 
             if (await CheckIfParentIsDir(destinationPath, ownerId) == false)
             {
-                //throw new ParentPathContainsFileException("The path provided contains a file " + destinationPath);
-                return new ServiceResult<UploadResult>(ResultReturn.NotFound); //parent folder doesnt exist -> 404
+                return new ServiceResult<UploadResult>(ResultReturn.NotFound, null); //parent folder doesnt exist -> 404
             }
 
             //checking if the file maybe already exists
@@ -379,18 +404,20 @@ namespace cloud.api.Services
             {
                 fullPath = $"{successfulNormalizedParentPath}/{fileName}";
             }
-            var resultingFileInfo = await TryGetFileMetaDataByPath(fullPath, ownerId); //REALLY memory inefficient I think, fix by adding new internal method for metadata
-
-            if (resultingFileInfo.result != ResultReturn.OK) //OPEN do a better chech later to ensure its really the same file
+            
+            //old way
+            var resultingFileInfo = await TryGetFileMetadataByPath(fullPath, ownerId);
+            if (resultingFileInfo.result != ResultReturn.OK) //OPEN do a better check later to ensure its really the same file
             {
-                return new ServiceResult<UploadResult>(ResultReturn.NotFound);
+                return new ServiceResult<UploadResult>(ResultReturn.NotFound, null);
             }
             ObjectId ObjectId = resultingFileInfo.Value.Id; //Mongo compatible
 
             if ((UploadType)resultingFileInfo.Value.Metadata["type"].AsInt32 == UploadType.Dir)
             {
-                return new ServiceResult<UploadResult>(ResultReturn.Conflict); //thats a folder, cant replace it with a file
+                return new ServiceResult<UploadResult>(ResultReturn.Conflict, "Cannot replace directory with file"); //thats a folder, cant replace it with a file
             }
+           
 
             //keep the old metadata (owner, parent, permissions, later sharing), only the contentType is new
             var metadata = resultingFileInfo.Value.Metadata.DeepClone().AsBsonDocument;
@@ -405,7 +432,7 @@ namespace cloud.api.Services
             }
             catch
             {
-                return new ServiceResult<UploadResult>(ResultReturn.Error);
+                return new ServiceResult<UploadResult>(ResultReturn.Error, null);
             }
 
             //2. THEN delete the old one
@@ -416,25 +443,70 @@ namespace cloud.api.Services
             catch
             {
                 await _bucket.DeleteAsync(newFileId); //roll back so there arent 2 files with the same name
-                return new ServiceResult<UploadResult>(ResultReturn.Error);
+                return new ServiceResult<UploadResult>(ResultReturn.Error, null);
             }
 
-            return new ServiceResult<UploadResult>(ResultReturn.OK, new UploadResult(newFileId.ToString()));
+            return new ServiceResult<UploadResult>(ResultReturn.OK, null, new UploadResult(newFileId.ToString()));
+        }
+        public async Task<ServiceResult<string>> UpdateFileMetadataByPath(string ownerId, string originPath, string targetParent, string targetFileName) //test this
+        {
+            if (!VirtualPath.TryNormalizePath(originPath, out string normalizedPath))
+            {
+                return new ServiceResult<string>(ResultReturn.BadRequest, null);
+            }
+            (string originParent, string originFileName) results = VirtualPath.SplitPath(normalizedPath);
+            if (!VirtualPath.TryNormalizeFileName(targetFileName, out string normalizedTargetFileName))
+            {
+                return new ServiceResult<string>(ResultReturn.BadRequest, null);
+            }
+            if (await CheckIfParentIsDir(targetParent, ownerId) == false)
+            {
+                return new ServiceResult<string>(ResultReturn.NotFound, "The path provided contains an nonexistant directory", null); //parent folder doesnt exist -> 404
+            }
+
+            //find origin file and check if its a file or dir
+            var filterBuilder = Builders<GridFSFileInfo>.Filter;
+            var originFileFilter = filterBuilder.Eq(x => x.Filename, results.originFileName) &
+             filterBuilder.Eq(x => x.Metadata["ownerId"], ownerId) &
+             filterBuilder.Eq(x => x.Metadata["parent"], results.originParent);
+
+            var originFileInfo = await _bucket.Find(originFileFilter).FirstOrDefaultAsync(); //not finding anything on PATCH test "move into missing folder"
+            if (originFileInfo == null)
+            {
+                return new ServiceResult<string>(ResultReturn.NotFound, null);
+            }
+            if (originFileInfo.Metadata["type"] == UploadType.Dir)
+            {
+                return new ServiceResult<string>(ResultReturn.BadRequest, null);
+            }
+
+            //ensure no conlict with target dir
+            var conflictCheckFilterBuilder = Builders<GridFSFileInfo>.Filter;
+            var conflictCheckFilter = conflictCheckFilterBuilder.Eq(x => x.Filename, normalizedTargetFileName) &
+             conflictCheckFilterBuilder.Eq(x => x.Metadata["ownerId"], ownerId) &
+             conflictCheckFilterBuilder.Eq(x => x.Metadata["parent"], targetParent);
+
+            var conflictFileInfo = await _bucket.Find(conflictCheckFilter).FirstOrDefaultAsync();
+            if (conflictFileInfo != null)
+            {
+                return new ServiceResult<string>(ResultReturn.Conflict, null);
+            }
+
+            //add the updated metadata separately from removing the old
+            var filter = Builders<BsonDocument>.Filter.Eq("_id", originFileInfo.Id);
+
+            var addTargetMetadata = Builders<BsonDocument>.Update
+             .Set("metadata.parent", targetParent)
+             .Set("filename", targetFileName);
+            var updateResult = await _fsFiles.UpdateOneAsync(filter, addTargetMetadata);
+
+            if (updateResult.ModifiedCount > 0)
+            {
+                return new ServiceResult<string>(ResultReturn.OK, null);
+            }
+            return new ServiceResult<string>(ResultReturn.Error, null);
         }
 
-
-        /*public async Task<ResultReturn> TryUpdateFileContentById(IFormFile file, string userId)
-        {
-            var builder = Builders<GridFSFileInfo>.Filter;
-            ObjectId objectId = ObjectId.Parse(fileId);
-            var filter = builder.Eq("metadata.ownerId", userId) &
-                         builder.Eq(x => x.Id, objectId);
-            var fileInfo = await _bucket.Find(filter).FirstOrDefaultAsync();
-            if (fileInfo == null)
-            {
-                return ResultReturn.NotFound;
-            }
-            await _bucket
-        }*/
+         
     }
 }

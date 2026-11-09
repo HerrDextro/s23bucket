@@ -9,6 +9,19 @@ namespace cloud.api.Services
 {
     public static class VirtualPath
     {
+        /*
+         • < (less than)
+• > (greater than)
+• : (colon)
+• " (double quote)
+• / (forward slash)
+• \ (backslash)
+• | (vertical bar or pipe)
+• ? (question mark)
+• * (asterisk)
+
+         */
+        static char[] invalidCharArray = { '<', '>', ':', '"', '/', '\\', '|', '?', '*' };
         public static bool TryNormalizePath(string? path, out string normalizedPath) //All AI btw
         {
             normalizedPath = string.Empty;
@@ -56,6 +69,32 @@ namespace cloud.api.Services
             }
 
             normalizedPath = normalized;
+            return true;
+        }
+        public static bool TryNormalizeFileName(string fileName, out string normalizedFileName) 
+        {
+            normalizedFileName = string.Empty;
+
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                return false;
+            }
+            string normalized = fileName.Trim().Normalize(NormalizationForm.FormC);
+
+            if (normalized == "..")
+            {
+                return false;
+            }
+            if (normalized == ".")
+            {
+                return false;
+            }
+
+            if (normalized.Any(c => invalidCharArray.Contains(c)))
+            {
+                return false;
+            }
+            normalizedFileName = normalized;
             return true;
         }
         public static (string parent, string name) SplitPath(string path)
