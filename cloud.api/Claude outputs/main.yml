@@ -1,0 +1,83 @@
+name: API tests
+
+# Runs the Postman collection in postman/ against a fresh API + MongoDB on every push and pull request.
+# Needs no secrets: the database and keys only exist for the few minutes the job runs.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  api-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # appsettings.json is gitignored, so it doesn't exist on the runner.
+      # Only non-secret settings go in here, the secrets come from .env below.
+      - name: Create appsettings.json
+        run: |
+          cat > cloud.api/appsettings.json <<'EOF'
+          {
+            "MongoDbSettings": {
+              "ConnectionString": "",
+              "MainDatabase": "maindb",
+              "IdentityDatabase": "identitydb",
+              "ServiceDatabase": "servicedb"
+            },
+            "JwtSettings": {
+              "SecretKey": "",
+              "Issuer": "s23bucket",
+              "Audience": "s23client",
+              "ExpiryInMinutes": 60,
+              "ExternalClientExpiryInMinutes": 1
+            },
+            "Logging": { "LogLevel": { "Default": "Information", "Microsoft.AspNetCore": "Warning" } },
+            "AllowedHosts": "*"
+          }
+          EOF
+
+      # Throwaway credentials, new random values on every run.
+      - name: Create .env
+        run: |
+          MONGO_USER=ci
+          MONGO_PASS=$(openssl rand -hex 16)
+          {
+            echo "MONGO_ROOT_USER=$MONGO_USER"
+            echo "MONGO_ROOT_PASS=$MONGO_PASS"
+            echo "JWT_SECRET=$(openssl rand -base64 48)"
+            echo "MongoDbSettings__ConnectionString=mongodb://$MONGO_USER:$MONGO_PASS@mongodb:27017"
+          } > .env
+
+      # Only docker-compose.yml: the override file mounts Windows %APPDATA% folders that don't exist here.
+      - name: Start API and MongoDB
+        run: docker compose -f docker-compose.yml up -d --build
+
+      - name: Wait for the API
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:5000/ > /dev/null; then
+              echo "API is up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "API did not start within 2 minutes"
+          docker compose -f docker-compose.yml logs
+          exit 1
+
+      - name: Run Postman collection
+        run: >
+          npx --yes newman@6 run postman/s23bucket.postman_collection.json
+          --working-dir postman
+          --env-var baseUrl=http://localhost:5000
+
+      - name: Show API logs
+        if: failure()
+        run: docker compose -f docker-compose.yml logs cloud.api
+
+      - name: Shut down
+        if: always()
+        run: docker compose -f docker-compose.yml down -v
